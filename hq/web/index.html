@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HQ</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">▦</span> <span id="company-name">HQ</span></div>
+    <nav class="tabs" id="main-tabs">
+      <button data-tab="office" class="active">Office</button>
+      <button data-tab="board">Board</button>
+    </nav>
+    <div id="paused-banner" class="paused" hidden></div>
+    <div class="top-actions">
+      <button id="pause-btn" class="ghost">Pause company</button>
+      <button id="inbox-btn" class="inbox-btn">Inbox <span id="inbox-count" class="badge">0</span></button>
+    </div>
+  </header>
+  <main class="layout">
+    <section class="stage">
+      <div id="office-view" class="view"></div>
+      <div id="board-view" class="view" hidden></div>
+    </section>
+    <aside class="sidebar">
+      <nav class="tabs small" id="side-tabs">
+        <button data-tab="chat" class="active">CEO</button>
+        <button data-tab="inbox">Inbox</button>
+        <button data-tab="profile">Founder profile</button>
+      </nav>
+      <div id="chat-view" class="side-view"></div>
+      <div id="inbox-view" class="side-view" hidden></div>
+      <div id="profile-view" class="side-view" hidden></div>
+    </aside>
+  </main>
+  <div id="drawer" class="drawer" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
