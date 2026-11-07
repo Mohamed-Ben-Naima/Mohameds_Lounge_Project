@@ -15,6 +15,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg);
@@ -113,7 +114,7 @@ table.kv td { border-bottom: 1px solid var(--line); padding: 4px 6px; }
 
 /* Office */
 .office-wrap { display: flex; justify-content: center; }
-.office-wrap canvas { image-rendering: pixelated; border-radius: var(--radius); border: 1px solid var(--line); max-width: 100%; height: auto; }
+.office-wrap canvas { width: 100%; max-width: 1500px; image-rendering: pixelated; border-radius: var(--radius); border: 1px solid var(--line); max-width: 100%; height: auto; }
 .office-label { position: fixed; pointer-events: none; background: rgba(0,0,0,.85); padding: 3px 8px; border-radius: 4px; font-size: 12px; z-index: 5; }
 
 @media (max-width: 900px) {
