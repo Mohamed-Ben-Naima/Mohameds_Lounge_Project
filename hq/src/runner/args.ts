@@ -33,10 +33,14 @@ export function buildClaudeArgs(spec: RunSpec, files: RunFiles): string[] {
   ];
 }
 
+// Absolute URL of the tsx loader: the MCP server starts in the agent's workspace, where a bare
+// `--import tsx` cannot be resolved.
+const TSX_LOADER = import.meta.resolve('tsx');
+
 export function buildMcpConfig(hqUrl: string, token: string, mcpEntryAbs: string): object {
   return {
     mcpServers: {
-      hq: { command: process.execPath, args: ['--import', 'tsx', mcpEntryAbs], env: { HQ_URL: hqUrl, HQ_RUN_TOKEN: token } },
+      hq: { command: process.execPath, args: ['--import', TSX_LOADER, mcpEntryAbs], env: { HQ_URL: hqUrl, HQ_RUN_TOKEN: token } },
     },
   };
 }

@@ -58,7 +58,11 @@ test('prompt is not in args', () => {
 
 test('mcp config and settings shapes', () => {
   const m = buildMcpConfig('http://127.0.0.1:4600', 'tok', 'C:/hq/src/mcp/server.ts') as any;
-  expect(m.mcpServers.hq).toMatchObject({ command: process.execPath, args: ['--import', 'tsx', 'C:/hq/src/mcp/server.ts'], env: { HQ_URL: 'http://127.0.0.1:4600', HQ_RUN_TOKEN: 'tok' } });
+  expect(m.mcpServers.hq).toMatchObject({ command: process.execPath, env: { HQ_URL: 'http://127.0.0.1:4600', HQ_RUN_TOKEN: 'tok' } });
+  // The loader must be absolute: the MCP server starts in the agent's workspace, which has no node_modules.
+  expect(m.mcpServers.hq.args[0]).toBe('--import');
+  expect(m.mcpServers.hq.args[1]).toMatch(/^file:\/\/\/.*\/node_modules\/tsx\//);
+  expect(m.mcpServers.hq.args[2]).toBe('C:/hq/src/mcp/server.ts');
   const s = buildSettings('C:/hq/src/gate/egress-hook.mjs') as any;
   expect(s.hooks.PreToolUse[0].matcher).toBe('Bash|PowerShell');
   expect(s.hooks.PreToolUse[0].hooks[0].command).toContain('egress-hook.mjs');
