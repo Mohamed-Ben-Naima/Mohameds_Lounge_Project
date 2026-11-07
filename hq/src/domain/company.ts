@@ -316,7 +316,7 @@ export class Company {
     assertProjectTransition(p.status, to);
     const u = projects.update(this.db, p.id, { ...patch, status: to });
     this.record(actor, 'project.moved', 'project', p.id, { from: p.status, to });
-    this.bus.emit({ type: 'project.updated', project: u });
+    this.bus.emit({ type: 'project.updated', project: u, prev: p.status });
     return u;
   }
 

@@ -1,8 +1,9 @@
 // Every change in the company is announced here. The office and board react to these, nothing else.
-import type { Approval, Budget, ChatMessage, CrossTeamRequest, Project, Run, Task, TaskStatus } from '../types.ts';
+import type { Approval, Budget, ChatMessage, CrossTeamRequest, Project, ProjectStatus, Run, Task, TaskStatus } from '../types.ts';
 
 export type CompanyEvent =
-  | { type: 'project.updated'; project: Project }
+  /** prev is set only when the status changed. */
+  | { type: 'project.updated'; project: Project; prev?: ProjectStatus }
   | { type: 'task.created'; task: Task }
   | { type: 'task.updated'; task: Task; prev: TaskStatus }
   | { type: 'approval.created'; approval: Approval }
