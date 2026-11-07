@@ -11,7 +11,7 @@ import type { AgentRunner, RunOutcome, RunSpec, StreamEvent } from './types.ts';
 
 export interface ClaudeRunnerOpts {
   claudePath: string;
-  hqUrl: string;
+  hqUrl: () => string;
   mcpEntry: string;
   hookScript: string;
   runsDir: string;
@@ -35,7 +35,7 @@ export class ClaudeRunner implements AgentRunner {
       settingsPath: path.join(dir, 'settings.json'),
     };
     fs.writeFileSync(files.systemPromptPath, jobDescription(spec.agent, this.o.companyName));
-    fs.writeFileSync(files.mcpConfigPath, JSON.stringify(buildMcpConfig(this.o.hqUrl, spec.token, this.o.mcpEntry), null, 2));
+    fs.writeFileSync(files.mcpConfigPath, JSON.stringify(buildMcpConfig(this.o.hqUrl(), spec.token, this.o.mcpEntry), null, 2));
     fs.writeFileSync(files.settingsPath, JSON.stringify(buildSettings(this.o.hookScript), null, 2));
     return files;
   }
