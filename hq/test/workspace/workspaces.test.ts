@@ -61,8 +61,8 @@ test('collectOutbox accepts outbox/t1/report.md', () => {
 test('deliverInbox returns inbox/t1/report.md and copies content', () => {
   ws.ensure('cto'); ws.ensure('qa-engineer');
   const src = writeOutbox('cto', 'outbox/t0/report.md', 'hello');
-  expect(ws.deliverInbox('qa-engineer', 't1', [src])).toEqual(['inbox/t1/report.md']);
-  expect(fs.readFileSync(path.join(ws.dirOf('qa-engineer'), 'inbox/t1/report.md'), 'utf8')).toBe('hello');
+  expect(ws.deliverInbox('qa-engineer', 't1', [src])).toEqual(['inbox/t1/t0/report.md']);
+  expect(fs.readFileSync(path.join(ws.dirOf('qa-engineer'), 'inbox/t1/t0/report.md'), 'utf8')).toBe('hello');
 });
 
 test('storeDeliverables copies under projects/<pid>/deliverables/<tid>', () => {
@@ -83,4 +83,13 @@ test('resolveOwnFile accepts inbox and outbox, rejects notes.md and ../', () => 
   expect(ws.resolveOwnFile('cto', 'inbox/t0/b.md')).toBe(path.join(ws.dirOf('cto'), 'inbox', 't0', 'b.md'));
   expectBadPath(() => ws.resolveOwnFile('cto', 'notes.md'));
   expectBadPath(() => ws.resolveOwnFile('cto', '../ceo/notes.md'));
+});
+
+test('deliverInbox keeps same-named files from different tasks apart', () => {
+  ws.ensure('cto'); ws.ensure('ceo');
+  const a = writeOutbox('cto', 'outbox/tA/result.md', 'A');
+  const b = writeOutbox('cto', 'outbox/tB/result.md', 'B');
+  const out = ws.deliverInbox('ceo', 'plan', [a, b, a]);
+  expect(out).toEqual(['inbox/plan/tA/result.md', 'inbox/plan/tB/result.md']);
+  expect(fs.readFileSync(path.join(ws.dirOf('ceo'), out[1]), 'utf8')).toBe('B');
 });

@@ -1,4 +1,4 @@
-// Shell-command egress rules for agent runs. Plain JS so the hook runs with bare `node`.
+// Shell-command rules for agent runs. Plain JS so the hook runs with bare `node`.
 // This is a denylist and therefore a second line of defence: the first is that agents
 // hold no credentials for any outside service.
 
@@ -23,11 +23,23 @@ const PHRASE_RE = new RegExp(`(${BLOCKED_PHRASES.map(p => p.split(' ').map(escap
 // A command word at the start of the line or after a shell separator.
 const COMMAND_RE = new RegExp(`(^|[;&|]\\s*|\\(\\s*)(${BLOCKED_COMMANDS.join('|')})\\s`, 'i');
 
+// Workspace confinement for shell commands.
+const SENSITIVE_RE = /\.claude|hq\.sqlite|mcp\.json|\.credentials/i;
+const HOME_RE = /(^|[\s"'=(])~[\\/]|\$HOME\b|\$env:|%[A-Za-z_]+%|\$\{?USERPROFILE/i;
+const DOTDOT_RE = /(^|[\s"'=\\/])\.\.([\\/]|\s|$)/;
+const WIN_ABS_RE = /[A-Za-z]:[\\/][^\s"'|&;<>]*/g;
+const POSIX_DRIVE_RE = /(?:^|[\s"'=])(\/[a-zA-Z]\/[^\s"'|&;<>]*)/g;
+
+const norm = p => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+const OUTSIDE = 'Shell access is limited to your own workspace folder.';
+
 /**
  * @param {string} command
+ * @param {string} [cwd] the agent's workspace folder
  * @returns {{allow: true} | {allow: false, reason: string}}
  */
-export function checkCommand(command) {
+export function checkCommand(command, cwd) {
   const cmd = String(command ?? '');
   if (URL_RE.test(cmd)) {
     return { allow: false, reason: 'Use WebFetch to read web pages; nothing leaves this machine from a shell.' };
@@ -35,6 +47,14 @@ export function checkCommand(command) {
   const word = cmd.match(WORD_RE)?.[2] ?? cmd.match(PHRASE_RE)?.[1] ?? cmd.match(COMMAND_RE)?.[2];
   if (word) {
     return { allow: false, reason: `"${word}" is blocked: network, publishing and scanning tools are not allowed. Anything that must leave the machine goes through request_outbound.` };
+  }
+  if (SENSITIVE_RE.test(cmd) || HOME_RE.test(cmd) || DOTDOT_RE.test(cmd)) return { allow: false, reason: OUTSIDE };
+  const root = cwd ? norm(cwd) : null;
+  const inside = abs => root !== null && (norm(abs) === root || norm(abs).startsWith(`${root}/`));
+  for (const m of cmd.matchAll(WIN_ABS_RE)) if (!inside(m[0])) return { allow: false, reason: OUTSIDE };
+  for (const m of cmd.matchAll(POSIX_DRIVE_RE)) {
+    const asWin = m[1].replace(/^\/([a-zA-Z])\//, '$1:/');
+    if (!inside(asWin)) return { allow: false, reason: OUTSIDE };
   }
   return { allow: true };
 }

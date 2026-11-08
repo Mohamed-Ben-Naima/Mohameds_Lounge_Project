@@ -31,12 +31,12 @@ export function parseStreamLine(line: string): StreamEvent[] {
   return [];
 }
 
-// Unambiguous limit messages match even if the CLI does not flag them as errors.
-const STRONG = /usage limit reached|limit reached\s*\S?\s*resets/i;
-const WEAK = /usage limit|limit reached/i;
+// Only an error result can be a usage limit: agents may legitimately write about limits
+// (e.g. while researching Claude plans) in a normal final answer.
+const LIMIT = /usage limit|limit reached/i;
 
 export function detectUsageLimit(r: { isError: boolean; text: string }): { resetAt: Date | null } | null {
-  if (!STRONG.test(r.text) && !(r.isError && WEAK.test(r.text))) return null;
+  if (!r.isError || !LIMIT.test(r.text)) return null;
   const epoch = r.text.match(/\|(\d{10})\s*$/);
   return { resetAt: epoch ? new Date(Number(epoch[1]) * 1000) : null };
 }

@@ -116,6 +116,7 @@ export function taskPrompt(purpose: RunPurpose, ctx: PromptCtx): string {
         `- ${s.id} "${s.title}" (${getAgent(s.assigneeId).title}): ${s.status}${s.failureReason ? ` — ${s.failureReason}` : ''}\n  ${s.resultSummary ?? ''}`);
       return [
         taskHeader(t, ctx.project),
+        t.feedback && t.reworkCount > 0 ? `\nThe CEO asked for changes:\n${t.feedback}\nYou may create new subtasks if needed.` : '',
         '',
         'All your subtasks are finished:',
         ...subs,

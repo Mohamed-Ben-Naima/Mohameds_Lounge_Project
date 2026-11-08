@@ -29,7 +29,9 @@ Agents never talk to each other. Work moves only down and up the org chart, as t
 
 - **Nothing leaves your PC without your click.** Emails, posts, proposals and deployments stop in your **Inbox** with the CEO's recommendation. In this MVP, approving gives you the final text and files, and you send them yourself.
 - **Agents hold no passwords or keys.** They run with a stripped environment and no accounts for outside services. **Never put real passwords, API keys or client secrets in `hq/data/`.**
-- Agents can search and read the web. Shell commands that send data out (curl, ssh, git push, scanners…) are blocked. On Windows this block is a denylist: strong, but not airtight. The real protection is that agents have nothing to send with.
+- Agents can search and read the web. Shell commands that send data out (curl, ssh, git push, scanners…) or reach outside the agent's own folder are blocked. On Windows this block is a denylist: strong, but not airtight. An engineer agent could still write a script file and run it, and the script's contents are not checked. The real protection is that agents have nothing to send with. Running agent shells inside WSL/Docker comes after the MVP.
+- HQ only answers requests from this machine's own pages: other websites cannot read it or send it commands.
+- If a project gets **blocked** (an agent timed out or forgot to submit), open it and click **Unblock & retry**. To stop a project for good, click **Close project**.
 - **Pentesting is off.** The Pentester writes plans and reports only.
 - Research comes with sources, but agents can be wrong. Confirm legal, tax and price points (Startup Act, foreign-currency rules) with an accountant.
 
@@ -63,6 +65,6 @@ The **Founder profile** tab holds what the CEO has learned about how you work. T
 ## Tests
 
 ```bash
-npm test         # 138 tests
+npm test         # full test suite
 npm run typecheck
 ```

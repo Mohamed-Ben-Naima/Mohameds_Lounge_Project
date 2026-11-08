@@ -57,3 +57,10 @@ test('BOARD_COLUMNS has 10 entries in order', () => {
   ]);
   expect(BOARD_COLUMNS[4].label).toBe('Needs your OK (plan)');
 });
+
+test('any unfinished project can be rejected', () => {
+  for (const from of ['conception', 'budgeting', 'in_progress', 'awaiting_founder'] as ProjectStatus[]) {
+    expect(() => assertProjectTransition(from, 'rejected')).not.toThrow();
+  }
+  expect(() => assertProjectTransition('done', 'rejected')).toThrow(PolicyError);
+});

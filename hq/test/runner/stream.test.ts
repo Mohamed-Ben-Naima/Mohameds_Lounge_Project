@@ -35,3 +35,7 @@ test('normal error is not usage limit', () => {
   expect(detectUsageLimit({ isError: true, text: 'Tool failed' })).toBeNull();
   expect(detectUsageLimit({ isError: false, text: 'I hit no usage limit today' })).toBeNull();
 });
+
+test('an agent summary that mentions limits is not a usage limit', () => {
+  expect(detectUsageLimit({ isError: false, text: 'Claude Pro: usage limit reached after ~45 messages, resets every 5 hours' })).toBeNull();
+});

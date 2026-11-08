@@ -7,6 +7,7 @@ import * as tasks from '../../src/db/repos/tasks.ts';
 import * as projects from '../../src/db/repos/projects.ts';
 import * as runs from '../../src/db/repos/runs.ts';
 import * as budgets from '../../src/db/repos/budgets.ts';
+import * as kv from '../../src/db/repos/kv.ts';
 import { EventBus } from '../../src/events/bus.ts';
 import { Company } from '../../src/domain/company.ts';
 import { Workspaces } from '../../src/workspace/workspaces.ts';
@@ -17,9 +18,9 @@ import { loadConfig } from '../../src/config.ts';
 import type { AgentRunner, RunOutcome } from '../../src/runner/types.ts';
 import { ScriptedRunner, reviewedId, type Script } from '../support/scriptedRunner.ts';
 
-function setup(scripts: Record<string, Script> = {}, opts: { maxWork?: number; runner?: (h: { company: Company; tokens: TokenRegistry }) => AgentRunner } = {}) {
+function setup(scripts: Record<string, Script> = {}, opts: { maxWork?: number; realClock?: boolean; pausedForMs?: number; runner?: (h: { company: Company; tokens: TokenRegistry }) => AgentRunner } = {}) {
   const clock = { now: new Date('2026-11-07T10:00:00Z') };
-  const now = () => clock.now;
+  const now = () => (opts.realClock ? new Date() : clock.now);
   const db = openDb(':memory:');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hq-orch-'));
   const ws = new Workspaces(root);
@@ -31,6 +32,7 @@ function setup(scripts: Record<string, Script> = {}, opts: { maxWork?: number; r
   const runner = opts.runner ? opts.runner({ company, tokens }) : new ScriptedRunner(company, tokens, scripts);
   const config = { ...loadConfig({}), dataDir: root };
   const orch = new Orchestrator({ db, bus, company, queue, ws, tokens, runner, config, now });
+  if (opts.pausedForMs) kv.set(db, 'paused_until', new Date(now().getTime() + opts.pausedForMs).toISOString());
   orch.start();
   const outbox = (agentId: string, taskId: string, name: string) => {
     const rel = `outbox/${taskId}/${name}`;
@@ -202,4 +204,98 @@ test('cross-team request goes to CEO triage', async () => {
   expect(triage).toBeDefined();
   expect(triage!.agentId).toBe('ceo');
   expect(typeof triage!.payload.crossTeamRequestId).toBe('string');
+});
+
+// ---- review fixes ----
+
+test('CEO rework on a lead task with subtasks recompiles it', async () => {
+  let h!: ReturnType<typeof setup>;
+  const scripts = chainScripts(() => h);
+  let ceoReviews = 0;
+  scripts['ceo:review'] = (c, co, spec) => {
+    ceoReviews++;
+    co.reviewResult(c, { taskId: reviewedId(spec), decision: ceoReviews === 1 ? 'rework' : 'accept', feedback: 'Add the 3 scales' });
+  };
+  h = setup(scripts);
+  const p = h.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  h.company.acceptBrief(p.id);
+  await h.orch.idle();
+  expect(projects.get(h.db, p.id)!.status).toBe('awaiting_approval');
+  const runner = h.runner as ScriptedRunner;
+  expect(runner.calls.filter(c => c.agentId === 'chief-architect' && c.purpose === 'compile')).toHaveLength(2);
+  expect(runner.calls.find(c => c.agentId === 'chief-architect' && c.purpose === 'compile' && c.prompt.includes('Add the 3 scales'))).toBeDefined();
+});
+
+test('unblock retries a failed phase task', async () => {
+  const h = setup({
+    'chief-architect:work': (c, co, _s, call) => { if (call >= 2) co.submitResult(c, { summary: 'design', files: [] }); },
+    'ceo:review': accept,
+  });
+  const p = h.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  h.company.acceptBrief(p.id);
+  await h.orch.idle();
+  expect(projects.get(h.db, p.id)!.blocked).toBe(true);
+  h.company.unblock(p.id);
+  h.orch.retry(p.id);
+  await h.orch.idle();
+  expect(projects.get(h.db, p.id)!.status).toBe('budgeting');
+  h.orch.retry(p.id);
+  expect(tasks.listByProject(h.db, p.id).filter(t => t.phase === 'conception' && t.parentId === null)).toHaveLength(2);
+});
+
+test('report is created when the last delivery task fails', async () => {
+  const h = setup({ 'cfo:work': () => ({ ok: false, error: 'timeout' }) });
+  const p = projects.create(h.db, { title: 'P', brief: 'b', status: 'in_progress' });
+  h.company.hqCreatePhaseTask({ projectId: p.id, phase: 'delivery', assigneeId: 'cfo', title: 'Costs', instructions: 'i', attachAbs: [], assignedById: 'ceo' });
+  await h.orch.idle();
+  expect(tasks.listByProject(h.db, p.id).some(t => t.phase === 'report')).toBe(true);
+});
+
+test('lead can retry a failed subtask during compile', async () => {
+  const h = setup({
+    'cfo:work': (c, co) => { co.createSubtask(c, { assigneeId: 'cost-controller', title: 'Prices', instructions: 'i' }); },
+    'cost-controller:work': (c, co, _s, call) => { if (call >= 2) co.submitResult(c, { summary: 'prices', files: [] }); },
+    'cfo:compile': (c, co, _s, call) => {
+      if (call === 1) co.createSubtask(c, { assigneeId: 'cost-controller', title: 'Prices again', instructions: 'retry' });
+      else co.submitResult(c, { summary: 'compiled', files: [] });
+    },
+    'cfo:review': accept,
+    'ceo:review': accept,
+    'ceo:work': (c, co) => { co.submitResult(c, { summary: 'report', files: [] }); },
+  });
+  const p = projects.create(h.db, { title: 'P', brief: 'b', status: 'in_progress' });
+  const t = h.company.hqCreatePhaseTask({ projectId: p.id, phase: 'delivery', assigneeId: 'cfo', title: 'Costs', instructions: 'i', attachAbs: [], assignedById: 'ceo' });
+  await h.orch.idle();
+  expect(tasks.get(h.db, t.id)!.status).toBe('done');
+  expect(projects.get(h.db, p.id)!.blocked).toBe(false);
+});
+
+test('a paused company resumes on its own after a restart', async () => {
+  const h = setup({ 'chief-architect:work': (c, co) => { co.submitResult(c, { summary: 'd', files: [] }); } }, { realClock: true, pausedForMs: 100 });
+  const p = h.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  h.company.acceptBrief(p.id);
+  expect(h.queue.isPaused()).toBe(true);
+  await new Promise(r => setTimeout(r, 1600));
+  await h.orch.idle();
+  expect(tasks.listByProject(h.db, p.id)[0].status).toBe('in_review');
+});
+
+test('a usage limit with a past reset time still pauses at least a minute', async () => {
+  let h!: ReturnType<typeof setup>;
+  h = setup({ 'chief-architect:work': () => ({ ok: false, usageLimit: { resetAt: new Date(h.clock.now.getTime() - 3600_000) }, error: 'limit' }) });
+  const p = h.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  h.company.acceptBrief(p.id);
+  await h.orch.idle();
+  expect(h.queue.isPaused()).toBe(true);
+  expect(h.queue.pausedUntil()!.getTime()).toBeGreaterThanOrEqual(h.clock.now.getTime() + 60_000);
+});
+
+test('one non-chat run per agent at a time', () => {
+  const h = setup({}, { maxWork: 3, runner: () => ({ run: () => new Promise(() => {}) }) });
+  h.queue.enqueue({ agentId: 'ceo', purpose: 'review' });
+  h.queue.enqueue({ agentId: 'ceo', purpose: 'plan_delivery' });
+  h.queue.enqueue({ agentId: 'cmo', purpose: 'work' });
+  h.queue.enqueue({ agentId: 'ceo', purpose: 'chat' });
+  const start = h.queue.nextStartable().map(r => `${r.agentId}:${r.purpose}`).sort();
+  expect(start).toEqual(['ceo:chat', 'ceo:review', 'cmo:work']);
 });

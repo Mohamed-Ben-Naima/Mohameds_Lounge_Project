@@ -28,6 +28,7 @@ export interface ApiDeps {
   ws: Workspaces;
   chat: ChatService;
   pump: () => void;
+  retry: (projectId: string) => void;
 }
 
 type AgentState = 'idle' | 'working' | 'waiting' | 'blocked';
@@ -120,7 +121,8 @@ export function apiRoutes(d: ApiDeps) {
     app.post('/api/projects/:id/accept-brief', action(z.object({}), (_b, p) => d.company.acceptBrief(p.id)));
     app.post('/api/projects/:id/plan', action(decision('approve', 'revise', 'reject'), (b, p) => d.company.decidePlan(p.id, b.decision, b.feedback)));
     app.post('/api/projects/:id/report', action(decision('accept', 'send_back'), (b, p) => d.company.decideReport(p.id, b.decision, b.feedback)));
-    app.post('/api/projects/:id/unblock', action(z.object({}), (_b, p) => d.company.unblock(p.id)));
+    app.post('/api/projects/:id/unblock', action(z.object({}), (_b, p) => { const project = d.company.unblock(p.id); d.retry(p.id); return project; }));
+    app.post('/api/projects/:id/reject', action(z.object({}), (_b, p) => d.company.founderReject(p.id)));
     app.post('/api/approvals/:id', action(z.object({ decision: z.enum(['approve', 'reject']), editedContent: z.string().optional() }),
       (b, p) => d.company.decideApproval(p.id, b.decision, b.editedContent)));
 

@@ -54,7 +54,7 @@ export function createHq(opts: { config: Config; runner?: (h: { company: Company
 
   const orchestrator = new Orchestrator({ db, bus, company, queue, ws, tokens, runner, config, now });
   const chat = new ChatService(db, bus, queue, () => orchestrator.pump());
-  const app = buildApp({ config, db, bus, company, queue, ws, tokens, chat, pump: () => orchestrator.pump() });
+  const app = buildApp({ config, db, bus, company, queue, ws, tokens, chat, pump: () => orchestrator.pump(), retry: id => orchestrator.retry(id) });
   app.addHook('onListen', async () => {
     const addr = app.server.address();
     if (addr && typeof addr === 'object') boundPort = addr.port;

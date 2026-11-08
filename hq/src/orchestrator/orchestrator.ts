@@ -37,6 +37,8 @@ export interface OrchestratorDeps {
 
 const CEO_SESSION_KEY = 'ceo_session_id';
 const DEFAULT_PAUSE_MS = 30 * 60 * 1000;
+const MIN_PAUSE_MS = 60 * 1000;
+const MAX_TIMER_MS = 6 * 3600 * 1000;
 
 export class Orchestrator {
   private readonly d: OrchestratorDeps;
@@ -49,6 +51,57 @@ export class Orchestrator {
 
   start(): void {
     this.d.bus.on(e => this.onEvent(e));
+    if (this.d.queue.isPaused()) this.armResumeTimer();
+    this.pump();
+  }
+
+  /** Wake up when the pause ends (also after a restart). Long pauses re-arm every few hours. */
+  private armResumeTimer(): void {
+    const until = this.d.queue.pausedUntil();
+    if (!until) return;
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    const delay = Math.min(Math.max(0, until.getTime() - this.d.now().getTime()) + 1000, MAX_TIMER_MS);
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null;
+      this.pump();
+      if (this.d.queue.isPaused()) this.armResumeTimer();
+    }, delay);
+    this.resumeTimer.unref();
+  }
+
+  /**
+   * After the founder unblocks a project: retry whatever stopped it. Failed top-level tasks of the
+   * current phase are re-assigned (once each), missed reviews and compiles are re-queued, and an
+   * approved project with no delivery work gets a fresh delivery plan.
+   */
+  retry(projectId: string): void {
+    const { db, company } = this.d;
+    const p = projectsRepo.get(db, projectId);
+    if (!p) return;
+    const phases: Phase[] = p.status === 'conception' ? ['conception'] : p.status === 'budgeting' ? ['budgeting']
+      : p.status === 'in_progress' ? ['delivery', 'report'] : [];
+    const all = tasksRepo.listByProject(db, projectId);
+    for (const t of all) {
+      if (t.parentId !== null || !phases.includes(t.phase) || t.status !== 'failed' || t.failureReason?.endsWith('(retried)')) continue;
+      tasksRepo.update(db, t.id, { failureReason: `${t.failureReason ?? 'failed'} (retried)` });
+      company.hqCreatePhaseTask({
+        projectId, phase: t.phase, assigneeId: t.assigneeId, assignedById: 'ceo', title: t.title, instructions: t.instructions, attachAbs: t.attachments,
+      });
+    }
+    const active = [...runsRepo.listByStatus(db, 'queued'), ...runsRepo.listByStatus(db, 'running')].filter(r => r.projectId === projectId);
+    for (const t of tasksRepo.listByProject(db, projectId)) {
+      if (t.status === 'in_review' && !active.some(r => r.purpose === 'review' && r.payload.reviewTaskId === t.id)) {
+        this.enqueue({ agentId: t.assignedById, purpose: 'review', projectId, payload: { reviewTaskId: t.id } });
+      } else if (t.status === 'waiting_subtasks' && tasksRepo.listChildren(db, t.id).every(c => isTerminal(c.status))) {
+        company.hqSetTaskStatus(t.id, 'running');
+        this.enqueue({ agentId: t.assigneeId, purpose: 'compile', taskId: t.id, projectId });
+      }
+    }
+    if (p.status === 'in_progress') {
+      const delivery = tasksRepo.listByProject(db, projectId).filter(t => t.parentId === null && t.phase === 'delivery');
+      if (delivery.length === 0 && !active.some(r => r.purpose === 'plan_delivery')) this.enqueue({ agentId: 'ceo', purpose: 'plan_delivery', projectId });
+      else this.maybeCreateReport(projectsRepo.get(db, projectId)!);
+    }
     this.pump();
   }
 
@@ -136,8 +189,9 @@ export class Orchestrator {
       }
       return;
     }
-    if (t.status !== 'done') return;
     const project = projectsRepo.get(db, t.projectId)!;
+    if (t.phase === 'delivery' && project.status === 'in_progress') return this.maybeCreateReport(project);
+    if (t.status !== 'done') return;
     const top = (phase: Phase) => tasksRepo.listByProject(db, project.id).filter(x => x.parentId === null && x.phase === phase);
     const phaseDone = (phase: Phase) => top(phase).length > 0 && top(phase).every(x => isTerminal(x.status)) && top(phase).some(x => x.status === 'done');
 
@@ -151,17 +205,24 @@ export class Orchestrator {
       });
     } else if (t.phase === 'budgeting' && project.status === 'budgeting' && phaseDone('budgeting')) {
       company.hqSetProjectStatus(project.id, 'awaiting_approval');
-    } else if (t.phase === 'delivery' && project.status === 'in_progress' && top('delivery').every(x => isTerminal(x.status))) {
-      const openReport = top('report').some(x => !isTerminal(x.status));
-      if (!openReport) {
-        company.hqCreatePhaseTask({
-          projectId: project.id, phase: 'report', assigneeId: 'ceo', assignedById: 'ceo',
-          title: `Final report: ${project.title}`,
-          instructions: 'Write the final report for the founder: what was delivered, by whom, open issues, and the deliverable files that matter. Attach the key files in your result.',
-          attachAbs: this.phaseFiles(project.id, ['conception', 'budgeting', 'delivery']),
-        });
-      }
     }
+  }
+
+  private maybeCreateReport(project: Project): void {
+    const { db, company } = this.d;
+    const top = (phase: Phase) => tasksRepo.listByProject(db, project.id).filter(x => x.parentId === null && x.phase === phase);
+    const delivery = top('delivery');
+    if (project.status !== 'in_progress' || delivery.length === 0 || !delivery.every(x => isTerminal(x.status))) return;
+    if (top('report').some(x => !isTerminal(x.status))) return;
+    const planning = [...runsRepo.listByStatus(db, 'queued'), ...runsRepo.listByStatus(db, 'running')]
+      .some(r => r.projectId === project.id && r.purpose === 'plan_delivery');
+    if (planning) return;
+    company.hqCreatePhaseTask({
+      projectId: project.id, phase: 'report', assigneeId: 'ceo', assignedById: 'ceo',
+      title: `Final report: ${project.title}`,
+      instructions: 'Write the final report for the founder: what was delivered, by whom, what failed and why, open issues, and the deliverable files that matter. Attach the key files in your result.',
+      attachAbs: this.phaseFiles(project.id, ['conception', 'budgeting', 'delivery']),
+    });
   }
 
   private phaseFiles(projectId: string, phases: Phase[]): string[] {
@@ -182,7 +243,7 @@ export class Orchestrator {
 
     if (task) {
       if (run.purpose === 'work' && (task.status === 'queued' || task.status === 'rework')) company.hqSetTaskStatus(task.id, 'running');
-      else if (run.purpose === 'compile' && task.status === 'queued') company.hqSetTaskStatus(task.id, 'running');
+      else if (run.purpose === 'compile' && (task.status === 'queued' || task.status === 'rework')) company.hqSetTaskStatus(task.id, 'running');
       else if (task.status !== 'running') return this.finishRun(run, 'failed', 0, null, `stale: task is ${task.status}`);
     }
 
@@ -263,9 +324,12 @@ export class Orchestrator {
       const t = tasksRepo.get(db, run.taskId)!;
       if (t.status !== 'running') return;
       const children = tasksRepo.listChildren(db, t.id);
+      if (children.some(c => !isTerminal(c.status))) {
+        company.hqSetTaskStatus(t.id, 'waiting_subtasks');
+        return;
+      }
       if (run.purpose === 'work' && children.length > 0) {
-        if (children.every(c => isTerminal(c.status))) this.enqueue({ agentId: t.assigneeId, purpose: 'compile', taskId: t.id, projectId: t.projectId });
-        else company.hqSetTaskStatus(t.id, 'waiting_subtasks');
+        this.enqueue({ agentId: t.assigneeId, purpose: 'compile', taskId: t.id, projectId: t.projectId });
         return;
       }
       this.failTask(t, 'ended without submit_result');
@@ -307,14 +371,13 @@ export class Orchestrator {
   private onUsageLimit(run: Run, outcome: RunOutcome): void {
     const { db, company, queue, now } = this.d;
     this.finishRun(run, 'paused', outcome.costUsd, outcome.sessionId, outcome.error ?? 'usage limit reached');
-    const until = outcome.usageLimit!.resetAt ?? new Date(now().getTime() + DEFAULT_PAUSE_MS);
+    const reported = outcome.usageLimit!.resetAt?.getTime() ?? now().getTime() + DEFAULT_PAUSE_MS;
+    const until = new Date(Math.max(reported, now().getTime() + MIN_PAUSE_MS));
     queue.pause(until);
     const t = run.taskId ? tasksRepo.get(db, run.taskId) : null;
     if (t && t.status === 'running') company.hqSetTaskStatus(t.id, 'queued');
     else if (!t) this.enqueue({ agentId: run.agentId, purpose: run.purpose, projectId: run.projectId ?? undefined, payload: run.payload });
-    if (this.resumeTimer) clearTimeout(this.resumeTimer);
-    this.resumeTimer = setTimeout(() => { this.resumeTimer = null; this.pump(); }, Math.max(0, until.getTime() - Date.now()) + 1000);
-    this.resumeTimer.unref();
+    this.armResumeTimer();
   }
 
   private failRun(run: Run, error: string): void {

@@ -56,7 +56,10 @@ export class ClaudeRunner implements AgentRunner {
       readline.createInterface({ input: child.stdout }).on('line', line => {
         log.write(`${line}\n`);
         for (const e of parseStreamLine(line)) {
-          if (e.kind === 'init') sessionId = e.sessionId;
+          if (e.kind === 'init') {
+            sessionId = e.sessionId;
+            fs.rmSync(files.mcpConfigPath, { force: true }); // the token file is no longer needed on disk
+          }
           if (e.kind === 'result') result = e;
           onEvent(e);
         }

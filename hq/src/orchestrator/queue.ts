@@ -51,10 +51,12 @@ export class RunQueue {
       .map((r, i) => ({ r, i }))
       .sort((a, b) => PRIORITY[a.r.purpose] - PRIORITY[b.r.purpose] || a.i - b.i)
       .map(x => x.r);
+    // One non-chat run per agent: an agent works on one thing at a time at its own desk.
+    const busy = new Set(running.filter(r => r.purpose !== 'chat').map(r => r.agentId));
     const out: Run[] = [];
     for (const r of queued) {
       if (r.purpose === 'chat' && chatFree > 0) { out.push(r); chatFree--; }
-      else if (r.purpose !== 'chat' && workFree > 0) { out.push(r); workFree--; }
+      else if (r.purpose !== 'chat' && workFree > 0 && !busy.has(r.agentId)) { out.push(r); workFree--; busy.add(r.agentId); }
     }
     return out;
   }

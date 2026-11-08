@@ -39,15 +39,23 @@ export class Workspaces {
     for (const a of ROSTER) this.ensure(a.id);
   }
 
-  /** Copies absolute source files into the agent's inbox/<folder>/ and returns workspace-relative paths. */
+  /**
+   * Copies absolute source files into inbox/<folder>/<source folder>/<name> (the source folder is the
+   * producing task's id), so same-named files from different tasks never overwrite each other.
+   */
   deliverInbox(agentId: string, folder: string, files: string[]): string[] {
-    const target = path.join(this.dirOf(agentId), 'inbox', folder);
-    fs.mkdirSync(target, { recursive: true });
-    return files.map(src => {
+    const out: string[] = [];
+    for (const src of files) {
+      const sub = path.basename(path.dirname(src));
       const name = path.basename(src);
+      const rel = `inbox/${folder}/${sub}/${name}`;
+      if (out.includes(rel)) continue;
+      const target = path.join(this.dirOf(agentId), 'inbox', folder, sub);
+      fs.mkdirSync(target, { recursive: true });
       fs.copyFileSync(src, path.join(target, name));
-      return `inbox/${folder}/${name}`;
-    });
+      out.push(rel);
+    }
+    return out;
   }
 
   /** Validates that every path is an existing file in the agent's own outbox. */

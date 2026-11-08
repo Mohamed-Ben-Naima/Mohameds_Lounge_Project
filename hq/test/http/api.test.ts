@@ -84,3 +84,31 @@ test('unknown project returns 404', async () => {
 test('config host is always 127.0.0.1', () => {
   expect(loadConfig({ HQ_HOST: '0.0.0.0' }).host).toBe('127.0.0.1');
 });
+
+test('rejects a foreign Host header (DNS rebinding)', async () => {
+  const r = await hq.app.inject({ method: 'GET', url: '/api/state', headers: { host: 'evil.example:4600' } });
+  expect(r.statusCode).toBe(403);
+});
+
+test('rejects cross-origin requests', async () => {
+  const p = hq.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  const r = await hq.app.inject({ method: 'POST', url: `/api/projects/${p.id}/accept-brief`, payload: {}, headers: { origin: 'https://evil.example' } });
+  expect(r.statusCode).toBe(403);
+  expect(projects.get(hq.db, p.id)!.status).toBe('sharpening');
+  const ok = await hq.app.inject({ method: 'POST', url: `/api/projects/${p.id}/accept-brief`, payload: {}, headers: { origin: 'http://127.0.0.1:4600' } });
+  expect(ok.statusCode).toBe(200);
+});
+
+test('POST without a JSON body type is refused', async () => {
+  const p = hq.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  const r = await hq.app.inject({ method: 'POST', url: `/api/projects/${p.id}/accept-brief`, payload: 'x', headers: { 'content-type': 'text/plain' } });
+  expect(r.statusCode).toBe(415);
+});
+
+test('founder can close a stuck project', async () => {
+  const p = hq.company.founderAddProject({ title: 'P', brief: 'b', status: 'sharpening' });
+  await post(`/api/projects/${p.id}/accept-brief`);
+  const r = await post(`/api/projects/${p.id}/reject`);
+  expect(r.statusCode).toBe(200);
+  expect(projects.get(hq.db, p.id)!.status).toBe('rejected');
+});

@@ -241,6 +241,11 @@ export class Company {
     return this.moveProject('founder', projectId, 'in_progress', { brief });
   }
 
+  /** Close a project from any unfinished state (e.g. one that is stuck). */
+  founderReject(projectId: string): Project {
+    return this.moveProject('founder', projectId, 'rejected');
+  }
+
   unblock(projectId: string): Project {
     return this.saveProject('founder', 'project.unblocked', projectId, { blocked: false, blockedReason: null });
   }

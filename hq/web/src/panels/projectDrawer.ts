@@ -52,7 +52,10 @@ export async function openProject(id: string, quiet = false) {
   if (p.status === 'awaiting_founder') actions.push(
     h('button', { class: 'primary', onclick: act(`/api/projects/${id}/report`, { decision: 'accept' }, 'Delivery accepted.') }, 'Accept delivery'),
     h('button', { onclick: withFeedback(`/api/projects/${id}/report`, 'send_back', 'Sent back to the team.') }, 'Send back'));
-  if (p.blocked) actions.push(h('button', { onclick: act(`/api/projects/${id}/unblock`, {}, 'Unblocked.') }, 'Unblock'));
+  if (p.blocked) actions.push(h('button', { class: 'primary', onclick: act(`/api/projects/${id}/unblock`, {}, 'Unblocked. Retrying what stopped.') }, 'Unblock & retry'));
+  if (p.status !== 'done' && p.status !== 'rejected') actions.push(h('button', {
+    class: 'danger', onclick: () => { if (confirm('Close this project? Work on it stops.')) void act(`/api/projects/${id}/reject`, {}, 'Project closed.')(); },
+  }, 'Close project'));
 
   const budget = d.budget;
   const budgetView = budget ? h('table', { class: 'kv' },

@@ -48,3 +48,28 @@ test('hook denies malformed input', () => {
   const r = runHook('not json');
   expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
 });
+
+const CWD = 'C:\\hq\\data\\workspaces\\software-engineer';
+test.each([
+  'cat C:/Users/ASUS/.claude/.credentials.json',
+  'type C:\\hq\\data\\hq.sqlite',
+  'cat ../ceo/notes.md',
+  'sqlite3 ..\\..\\hq.sqlite',
+  'cat ~/secrets.txt',
+  'echo $HOME',
+  'dir %USERPROFILE%',
+  'Get-Content $env:APPDATA\\x',
+  'cat /c/Users/ASUS/file',
+  'cat data/runs/r1/mcp.json',
+])('denies outside-workspace access: %s', cmd => {
+  expect(checkCommand(cmd, CWD).allow).toBe(false);
+});
+
+test.each(['node build.js', 'cat outbox/t1/x.md', 'ls C:/hq/data/workspaces/software-engineer/outbox', 'npm test -- --run'])('allows in-workspace: %s', cmd => {
+  expect(checkCommand(cmd, CWD)).toEqual({ allow: true });
+});
+
+test('hook passes cwd to the rules', () => {
+  const r = runHook(JSON.stringify({ tool_name: 'Bash', cwd: CWD, tool_input: { command: 'cat ../ceo/notes.md' } }));
+  expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+});

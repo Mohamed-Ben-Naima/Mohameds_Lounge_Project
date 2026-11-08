@@ -5,11 +5,11 @@ import { PolicyError } from './errors.ts';
 const PROJECT_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
   idea: ['sharpening', 'rejected'],
   sharpening: ['conception', 'rejected'],
-  conception: ['budgeting'],
-  budgeting: ['awaiting_approval'],
+  conception: ['budgeting', 'rejected'],
+  budgeting: ['awaiting_approval', 'rejected'],
   awaiting_approval: ['in_progress', 'sharpening', 'rejected'],
-  in_progress: ['awaiting_founder'],
-  awaiting_founder: ['done', 'in_progress'],
+  in_progress: ['awaiting_founder', 'rejected'],
+  awaiting_founder: ['done', 'in_progress', 'rejected'],
   done: [],
   rejected: [],
 };
